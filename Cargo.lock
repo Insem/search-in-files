@@ -1145,6 +1145,7 @@ dependencies = [
  "libc",
  "mio",
  "num_cpus",
+ "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -1531,6 +1532,7 @@ version = "0.1.0"
 dependencies = [
  "regex",
  "rocket",
+ "tokio",
 ]
 
 [[package]]

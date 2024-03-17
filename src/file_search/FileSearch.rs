@@ -3,17 +3,38 @@ use core::fmt::Error;
 use std::{
     fs::{self, File},
     io::{self, BufRead, BufReader},
-    path::Path,
+    path::{Path, PathBuf},
+    pin::Pin,
 };
-pub fn search_in_files(dir: &Path, word: &str) -> io::Result<Vec<String>> {
-    println!("str:{:?}", &format!(r"{}(\W|$)", word));
+
+use tokio::task::{JoinHandle, JoinSet};
+pub async fn search_in_files(dir: &Path, word: &str) -> io::Result<Vec<String>> {
+    let mut set = JoinSet::new();
+    let mut match_arr: Vec<String> = Vec::new();
+    for ft in fold_files(dir, word)? {
+        set.spawn(ft);
+    }
+    while let Some(Ok(Ok(res))) = set.join_next().await {
+        match res {
+            Ok(file_path) => {
+                if file_path.is_some() {
+                    match_arr.push(file_path.unwrap())
+                }
+            }
+            Err(e) => println!("Error: {:?}", e),
+        }
+    }
+
+    Ok(match_arr)
+}
+fn fold_files(dir: &Path, word: &str) -> io::Result<Vec<JoinHandle<io::Result<Option<String>>>>> {
     let reg = regex::Regex::new(&format!(r"{}(\W|$)", word)).map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::Other,
             format!("Failed to build regex {:?}", format!(r"{}(\W|$)", word)),
         )
     })?;
-    let mut match_arr: Vec<String> = Vec::new();
+    let mut match_arr: Vec<JoinHandle<io::Result<Option<String>>>> = Vec::new();
     if !dir.exists() {
         return std::io::Result::Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -25,20 +46,29 @@ pub fn search_in_files(dir: &Path, word: &str) -> io::Result<Vec<String>> {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
-                match_arr.append(search_in_files(&path, word)?.as_mut());
+                match_arr.append(fold_files(&path, word)?.as_mut());
             } else {
-                if match_file(&path, &reg)? {
-                    match_arr.push(path.into_os_string().into_string().map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::Other, "Failed to get os file path")
-                    })?);
-                }
+                match_arr.push(tokio::spawn(do_files(Box::new(path), reg.clone())));
             }
         }
     }
 
     Ok(match_arr)
 }
-
+async fn do_files(path: Box<PathBuf>, reg: regex::Regex) -> io::Result<Option<String>> {
+    if match_file(&path, &reg)? {
+        return Ok(Some(
+            path.as_os_str()
+                .to_str()
+                .ok_or(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to get file path string {:?}", path),
+                ))?
+                .to_string(),
+        ));
+    }
+    Ok(None)
+}
 fn match_file(filepath: &Path, word: &regex::Regex) -> io::Result<bool> {
     let file = File::open(filepath)?;
     let reader = BufReader::new(file);
@@ -46,12 +76,10 @@ fn match_file(filepath: &Path, word: &regex::Regex) -> io::Result<bool> {
         let line = if _line.is_ok() {
             _line.unwrap()
         } else {
-            println!("Err: failed to read line in {:?}", filepath);
             continue;
         };
 
         if word.is_match(&line) {
-            println!("Found {:?}", filepath);
             return Ok(true);
         }
     }
@@ -59,8 +87,8 @@ fn match_file(filepath: &Path, word: &regex::Regex) -> io::Result<bool> {
     Ok(false)
 }
 
-#[test]
-fn test_search_in_files() {
+#[tokio::test]
+async fn test_search_in_files() {
     assert_eq!(
         vec![format!(
             "{}/src/file_search/tests/test_files/test1.txt",
@@ -81,11 +109,12 @@ fn test_search_in_files() {
             )),
             "эта"
         )
+        .await
         .unwrap()
     );
 }
-#[test]
-fn test_recursive_search_in_files() {
+#[tokio::test]
+async fn test_recursive_search_in_files() {
     assert_eq!(
         vec![
             format!(
@@ -116,11 +145,12 @@ fn test_recursive_search_in_files() {
             )),
             "трясла"
         )
+        .await
         .unwrap()
     );
 }
-#[test]
-fn test_search_with_punctiation() {
+#[tokio::test]
+async fn test_search_with_punctiation() {
     assert_eq!(
         vec![format!(
             "{}/src/file_search/tests/test_files/test1.txt",
@@ -141,11 +171,12 @@ fn test_search_with_punctiation() {
             )),
             "каналам"
         )
+        .await
         .unwrap()
     );
 }
-#[test]
-fn test_find_multiple_files() {
+#[tokio::test]
+async fn test_find_multiple_files() {
     assert_eq!(
         vec![
             format!(
@@ -184,6 +215,7 @@ fn test_find_multiple_files() {
             )),
             "он"
         )
+        .await
         .unwrap()
     );
 }

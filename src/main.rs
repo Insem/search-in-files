@@ -14,12 +14,13 @@ pub mod file_search;
 extern crate rocket;
 
 #[launch]
-fn server() -> _ {
+#[tokio::main]
+async fn server() -> _ {
     rocket::build().mount("/", routes![index])
 }
 const DIR: &'static str = "examples";
 #[get("/search/files/<word>")]
-fn index(word: &str) -> Result<Json<Vec<String>>, Custom<String>> {
+async fn index(word: &str) -> Result<Json<Vec<String>>, Custom<String>> {
     let arr = search_in_files(
         Path::new(&format!(
             "{}/{}",
@@ -32,6 +33,7 @@ fn index(word: &str) -> Result<Json<Vec<String>>, Custom<String>> {
         )),
         word,
     )
+    .await
     .map_err(|e| Custom(Status::ServiceUnavailable, e.to_string()))?;
 
     Ok(Json(arr))
