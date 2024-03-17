@@ -1,14 +1,9 @@
-use core::fmt::Error;
 use rocket::response::status::Custom;
-use rocket::serde::{json::Json, Serialize};
+use rocket::serde::json::Json;
 
-use crate::file_search::FileSearch::search_in_files;
+use crate::file_search::file_search::search_in_files;
 use rocket::http::Status;
-use std::{
-    fs::{self, File},
-    io::{self, BufRead, BufReader},
-    path::Path,
-};
+use std::path::Path;
 pub mod file_search;
 #[macro_use]
 extern crate rocket;
