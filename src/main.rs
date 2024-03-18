@@ -7,13 +7,16 @@ use std::path::Path;
 pub mod file_search;
 #[macro_use]
 extern crate rocket;
+//папка с файлами по умолчанию
+const DIR: &'static str = "examples";
 
+//Функция запуска
 #[launch]
 #[tokio::main]
 async fn server() -> _ {
     rocket::build().mount("/", routes![index])
 }
-const DIR: &'static str = "examples";
+//Собственно сам эндпоинт
 #[get("/search/files/<word>")]
 async fn index(word: &str) -> Result<Json<Vec<String>>, Custom<String>> {
     let arr = search_in_files(
@@ -30,6 +33,6 @@ async fn index(word: &str) -> Result<Json<Vec<String>>, Custom<String>> {
     )
     .await
     .map_err(|e| Custom(Status::ServiceUnavailable, e.to_string()))?;
-
+    //получаем массив с названиями и выводим джсоном
     Ok(Json(arr))
 }

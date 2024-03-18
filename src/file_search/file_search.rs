@@ -6,11 +6,14 @@ use std::{
 
 use tokio::task::{JoinHandle, JoinSet};
 pub async fn search_in_files(dir: &Path, word: &str) -> io::Result<Vec<String>> {
+    //создаём джоин сет токио для асинхронной обработки
     let mut set = JoinSet::new();
     let mut match_arr: Vec<String> = Vec::new();
+    //Добавляем футуры обработки каждого файла в джоинсет
     for ft in fold_files(dir, word)? {
         set.spawn(ft);
     }
+    //запускаем футуры из джоинсета. Они должны отрабатывать не в порядке запуска, а каждая возвращает результат сразу после отработки
     while let Some(Ok(Ok(res))) = set.join_next().await {
         match res {
             Ok(file_path) => {
@@ -25,13 +28,16 @@ pub async fn search_in_files(dir: &Path, word: &str) -> io::Result<Vec<String>> 
     Ok(match_arr)
 }
 fn fold_files(dir: &Path, word: &str) -> io::Result<Vec<JoinHandle<io::Result<Option<String>>>>> {
+    //создаём регулярку для поиска
     let reg = regex::Regex::new(&format!(r"{}(\W|$)", word)).map_err(|_e| {
         std::io::Error::new(
             std::io::ErrorKind::Other,
             format!("Failed to build regex {:?}", format!(r"{}(\W|$)", word)),
         )
     })?;
-    let mut match_arr: Vec<JoinHandle<io::Result<Option<String>>>> = Vec::new();
+    let mut fut_arr: Vec<JoinHandle<io::Result<Option<String>>>> = Vec::new();
+
+    //проверяем папку на корректность
     if !dir.exists() {
         return std::io::Result::Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -39,19 +45,23 @@ fn fold_files(dir: &Path, word: &str) -> io::Result<Vec<JoinHandle<io::Result<Op
         ));
     }
     if dir.is_dir() {
+        //читаем содержимаое папки
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
-                match_arr.append(fold_files(&path, word)?.as_mut());
+                //если есть папка внутри папки тоже её обрабатываем
+                fut_arr.append(fold_files(&path, word)?.as_mut());
             } else {
-                match_arr.push(tokio::spawn(do_files(Box::new(path), reg.clone())));
+                //добавляем футуры в массив для жоин сета
+                fut_arr.push(tokio::spawn(do_files(Box::new(path), reg.clone())));
             }
         }
     }
 
-    Ok(match_arr)
+    Ok(fut_arr)
 }
+//Если в файле есть совпадение возвращаем его путь
 async fn do_files(path: Box<PathBuf>, reg: regex::Regex) -> io::Result<Option<String>> {
     if match_file(&path, &reg)? {
         return Ok(Some(
@@ -69,6 +79,7 @@ async fn do_files(path: Box<PathBuf>, reg: regex::Regex) -> io::Result<Option<St
 fn match_file(filepath: &Path, word: &regex::Regex) -> io::Result<bool> {
     let file = File::open(filepath)?;
     let reader = BufReader::new(file);
+    //читем файл построчно, после первого совпадения возвращаем true
     for _line in reader.lines() {
         let line = if _line.is_ok() {
             _line.unwrap()
